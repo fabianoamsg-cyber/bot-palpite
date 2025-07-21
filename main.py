@@ -61,6 +61,7 @@ def enviar_bilhetes():
             texto += "\n\n🎯 *Confiança:* Alta\n#Palpites #Futebol"
             try:
                 bot.send_message(chat_id=GRUPO_ID, text=texto, parse_mode="Markdown")
+                print(f"✅ Bilhete enviado: {tipo}")
                 time.sleep(3)
             except Exception as e:
                 print(f"Erro ao enviar {tipo}: {e}")
@@ -68,16 +69,13 @@ def enviar_bilhetes():
 def iniciar_envio_continuo():
     while True:
         enviar_bilhetes()
-        time.sleep(1800)  # Aguarda 30 minutos para próximo envio
+        time.sleep(1800)  # A cada 30 minutos
 
-# Flask apenas para manter online no Render
+# Endpoint apenas para manter o Render online
 @app.route('/')
 def home():
-    return 'Bot de Palpites está rodando!'
-
-def iniciar_flask():
-    app.run(host='0.0.0.0', port=10000)
+    return 'Bot de Palpites está online com envio automático!'
 
 if __name__ == '__main__':
     Thread(target=iniciar_envio_continuo).start()
-    iniciar_flask()
+    app.run(host='0.0.0.0', port=10000)
