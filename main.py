@@ -2,15 +2,14 @@ import os
 import time
 import requests
 import telebot
-from flask import Flask
+from flask import Flask, request
 from threading import Thread
 
-# Variáveis de ambiente
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GRUPO_ID = os.getenv("GRUPO_ID")
 API_KEY = os.getenv("API_FOOTBALL_KEY")
+WEBHOOK_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-# Inicialização
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
@@ -61,21 +60,33 @@ def enviar_bilhetes():
             texto += "\n\n🎯 *Confiança:* Alta\n#Palpites #Futebol"
             try:
                 bot.send_message(chat_id=GRUPO_ID, text=texto, parse_mode="Markdown")
-                print(f"✅ Bilhete enviado: {tipo}")
+                print(f"✅ Enviado: {tipo}")
                 time.sleep(3)
             except Exception as e:
                 print(f"Erro ao enviar {tipo}: {e}")
 
+@app.route('/', methods=["GET"])
+def home():
+    return "Bot de Palpites está rodando com Webhook!"
+
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return '', 200
+
 def iniciar_envio_continuo():
     while True:
         enviar_bilhetes()
-        time.sleep(1800)  # A cada 30 minutos
+        time.sleep(1800)  # 30 minutos
 
-# Endpoint apenas para manter o Render online
-@app.route('/')
-def home():
-    return 'Bot de Palpites está online com envio automático!'
+def set_webhook():
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=f"{WEBHOOK_URL}/{BOT_TOKEN}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    set_webhook()
     Thread(target=iniciar_envio_continuo).start()
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=10000)
