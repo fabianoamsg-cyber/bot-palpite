@@ -1,35 +1,58 @@
 import os
-from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler
-from dotenv import load_dotenv
+import logging
+import asyncio
+from telegram import Bot
+from telegram.ext import ApplicationBuilder, ContextTypes, CallbackContext
+import aiohttp
+from datetime import datetime
 
-load_dotenv()
+# Configurações
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GRUPO_ID = os.getenv("GRUPO_ID")  # Ex: '-1002814723832'
+API_FOOTBALL_KEY = os.getenv("API_FOOTBALL_KEY")
 
-TOKEN = os.getenv("BOT_TOKEN")
-GRUPO_ID = os.getenv("GRUPO_ID")
-bot = Bot(token=TOKEN)
+# Log
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-app = Flask(__name__)
+async def obter_palpite():
+    url = "https://v3.football.api-sports.io/fixtures?next=10"
+    headers = {
+        "x-apisports-key": API_FOOTBALL_KEY
+    }
 
-def start(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Bot de palpites iniciado!")
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            dados = await response.json()
 
-def webhook_handler(request_data):
-    update = Update.de_json(request_data, bot)
-    dispatcher.process_update(update)
-    return "ok"
+    palpites = []
+    for jogo in dados["response"]:
+        teams = jogo["teams"]
+        fixture = jogo["fixture"]
+        date = datetime.fromisoformat(fixture["date"].replace("Z", "+00:00")).strftime("%d/%m %H:%M")
+        palpites.append(
+            f"📅 *{date}*\n⚽ *{teams['home']['name']}* vs *{teams['away']['name']}*\nAposta: *Over 1.5 Gols* ✅"
+        )
 
-@app.route(f"/{TOKEN}", methods=["POST"])
-def webhook():
-    return webhook_handler(request.get_json(force=True))
+    return "\n\n".join(palpites[:5]) if palpites else "Sem jogos disponíveis."
 
-@app.route("/")
-def home():
-    return "Bot de Palpites está online!"
+async def enviar_mensagem(context: CallbackContext):
+    texto = await obter_palpite()
+    await context.bot.send_message(chat_id=GRUPO_ID, text=texto, parse_mode="Markdown")
 
-dispatcher = Dispatcher(bot, None, workers=0)
-dispatcher.add_handler(CommandHandler("start", start))
+async def start_bot():
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    # Envia a cada 30 minutos
+    application.job_queue.run_repeating(enviar_mensagem, interval=1800, first=5)
+
+    print("Bot iniciado...")
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    await application.updater.idle()
+
+if __name__ == '__main__':
+    asyncio.run(start_bot())
