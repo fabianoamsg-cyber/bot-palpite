@@ -2,110 +2,65 @@ import os
 import time
 import random
 import requests
-import telebot
 from flask import Flask, request
-from threading import Thread
-from datetime import datetime
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, CommandHandler
+
+app = Flask(__name__)
 
 # Variáveis de ambiente
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_FOOTBALL_KEY")
 GRUPO_ID = os.getenv("GRUPO_ID")
+API_KEY = os.getenv("API_FOOTBALL_KEY")
 
-# Inicializações
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
+bot = Bot(token=BOT_TOKEN)
 
-# Função para obter palpites
-def gerar_palpite(tipo):
-    url = "https://v3.football.api-sports.io/fixtures"
-    params = {
-        "next": 20,
-        "timezone": "America/Sao_Paulo"
-    }
-    headers = {
-        "x-apisports-key": API_KEY
-    }
+def obter_palpite(jogo):
+    casa = jogo['homeTeam']['name']
+    fora = jogo['awayTeam']['name']
+    data = jogo['fixture']['date'][:10]
+    tipo = random.choice(["Over 1.5", "Over 2.5", "Ambas Marcam", "Vitória", "Empate", "Placar Exato"])
+    chance = random.randint(70, 95)
+    return f"*{casa} x {fora}* - `{tipo}`\n📆 {data} | 💡 Probabilidade: *{chance}%*"
+
+def buscar_jogos():
+    url = "https://v3.football.api-sports.io/fixtures?date=2025-07-23"
+    headers = {"x-apisports-key": API_KEY}
+    try:
+        resposta = requests.get(url, headers=headers)
+        dados = resposta.json()
+        return dados['response'][:5]  # Pega os 5 primeiros jogos
+    except Exception as e:
+        print("Erro ao buscar jogos:", e)
+        return []
+
+def enviar_bilhetes():
+    jogos = buscar_jogos()
+    if not jogos:
+        return
+
+    bilhete = [obter_palpite(jogo) for jogo in jogos]
+    media = random.randint(80, 95)
+
+    texto = "🏆 *Bilhete do Dia*\n\n" + "\n\n".join(bilhete)
+    texto += f"\n\n📊 *Confiança média:* *{media}%*\n#Palpites #Futebol"
 
     try:
-        response = requests.get(url, headers=headers, params=params)
-        data = response.json()
-
-        jogos = data["response"]
-        palpites = []
-
-        for jogo in jogos:
-            equipes = jogo["teams"]
-            data_jogo = jogo["fixture"]["date"]
-            data_formatada = datetime.strptime(data_jogo, "%Y-%m-%dT%H:%M:%S%z").strftime("%d/%m %H:%M")
-
-            casa = equipes["home"]["name"]
-            fora = equipes["away"]["name"]
-
-            if tipo == "Over 1.5":
-                chance = random.randint(72, 95)
-                palpite = f"🏟️ {casa} x {fora}\n📅 {data_formatada}\n🔮 Over 1.5 gols\n🎯 Chance: {chance}%"
-            elif tipo == "Ambas Marcam":
-                chance = random.randint(65, 90)
-                palpite = f"🏟️ {casa} x {fora}\n📅 {data_formatada}\n🤝 Ambas Marcam\n🎯 Chance: {chance}%"
-            elif tipo == "Vitória Mandante":
-                chance = random.randint(70, 88)
-                palpite = f"🏟️ {casa} x {fora}\n📅 {data_formatada}\n🏆 Vitória: {casa}\n🎯 Chance: {chance}%"
-            else:
-                continue
-
-            palpites.append((chance, palpite))
-
-        palpites.sort(reverse=True, key=lambda x: x[0])
-        melhores = [j[1] for j in palpites[:5]]
-        media_conf = sum([j[0] for j in palpites[:5]]) // 5
-
-        return melhores, media_conf
-
+        bot.send_message(chat_id=GRUPO_ID, text=texto, parse_mode="Markdown")
+        print("Bilhete enviado!")
     except Exception as e:
-        print(f"Erro ao obter palpites: {e}")
-        return [], 0
+        print(f"Erro ao enviar bilhete: {e}")
 
-# Envia os bilhetes
-def enviar_bilhetes():
-    tipos = ["Over 1.5", "Ambas Marcam", "Vitória Mandante"]
-    for tipo in tipos:
-        jogos, media = gerar_palpite(tipo)
-        if not jogos:
-            continue
-
-        texto = f"📌 *Bilhete - {tipo}*\n\n"
-        texto += "\n\n".join(jogos)
-        texto += f"\n\n🔥 *Confiança média:* {media}%\n#Palpites #Futebol"
-
-        try:
-            bot.send_message(chat_id=GRUPO_ID, text=texto, parse_mode="Markdown")
-            time.sleep(3)
-        except Exception as e:
-            print(f"Erro ao enviar bilhete {tipo}: {e}")
-
-# Endpoint de webhook correto
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return "OK", 200
-    return "Método não permitido", 405
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher = Dispatcher(bot, None, use_context=True)
+    dispatcher.process_update(update)
+    return "OK", 200
 
-# Rota simples
 @app.route("/")
-def index():
-    return "Bot de Palpites Ativo"
+def home():
+    return "Bot de Palpites Online!", 200
 
-# Agendamento de envio automático
-def agendar_envios():
-    while True:
-        enviar_bilhetes()
-        time.sleep(1800)  # 30 minutos
-
-# Início paralelo
 if __name__ == "__main__":
-    Thread(target=agendar_envios).start()
-    app.run(host="0.0.0.0", port=10000)
+    enviar_bilhetes()
