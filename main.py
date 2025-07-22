@@ -1,104 +1,98 @@
 import os
-import time
-import requests
 import telebot
+import requests
+import random
+import time
 from flask import Flask, request
-from threading import Thread
 
-# Variáveis de ambiente
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("API_FOOTBALL_KEY")
 GRUPO_ID = os.getenv("GRUPO_ID")
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL", "")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+
 app = Flask(__name__)
 
-# Tipos de aposta suportados
-TIPOS_APOSTA = [
-    "Over 1.5",
-    "Over 2.5",
-    "Over 3.5",
-    "Ambas Marcam",
-    "Vitória (1x2)",
-    "Empate",
-    "Placar Exato"
-]
+URL_API = "https://v3.football.api-sports.io/fixtures"
 
-# Gera bilhete com 5 jogos do tipo especificado
-def gerar_bilhete(tipo):
-    url = f"https://v3.football.api-sports.io/odds?bet={tipo}&timezone=America/Sao_Paulo"
-    headers = {
-        "x-apisports-key": API_KEY
-    }
+TIPOS = {
+    "Over 1.5": lambda: "Mais de 1.5 gols",
+    "Over 2.5": lambda: "Mais de 2.5 gols",
+    "Over 3.5": lambda: "Mais de 3.5 gols",
+    "Ambas Marcam": lambda: "Ambas as equipes marcam",
+    "Vitória": lambda: "Vitória do time favorito",
+    "Empate": lambda: "Empate no tempo normal",
+    "Placar Exato": lambda: f"{random.randint(1, 3)}x{random.randint(0, 2)}"
+}
 
-    try:
-        response = requests.get(url, headers=headers)
-        data = response.json()
-
-        bilhete = []
-        jogos_usados = set()
-
-        for resultado in data.get("response", []):
-            if len(bilhete) >= 5:
-                break
-            jogo = resultado.get("league", {}).get("name", "") + " - "
-            jogo += resultado.get("teams", {}).get("home", {}).get("name", "") + " x "
-            jogo += resultado.get("teams", {}).get("away", {}).get("name", "")
-
-            if jogo not in jogos_usados:
-                jogos_usados.add(jogo)
-                bilhete.append(f"• {jogo}")
-
-        return bilhete
-    except Exception as e:
-        print(f"Erro ao gerar bilhete: {e}")
+def buscar_jogos():
+    headers = {"x-apisports-key": API_KEY}
+    params = {"date": time.strftime("%Y-%m-%d"), "timezone": "America/Sao_Paulo"}
+    r = requests.get(URL_API, headers=headers, params=params)
+    if r.status_code == 200:
+        data = r.json()
+        return data.get("response", [])
+    else:
+        print("Erro na API:", r.text)
         return []
 
-# Envia um bilhete de um tipo (ex: Over 2.5)
+def montar_bilhete(jogos, tipo_aposta, max_jogos=5):
+    random.shuffle(jogos)
+    bilhete = [f"📊 *Bilhete {tipo_aposta}*\n"]
+    count = 0
+    for j in jogos:
+        try:
+            home = j['teams']['home']['name']
+            away = j['teams']['away']['name']
+            hora = j['fixture']['date'][11:16]
+            aposta = TIPOS[tipo_aposta]()
+            bilhete.append(f"🕒 {hora} — {home} vs {away}\n🔹 Aposta: *{aposta}*\n")
+            count += 1
+            if count == max_jogos:
+                break
+        except:
+            continue
+    return "\n".join(bilhete) if count else None
+
 def enviar_bilhetes():
-    try:
-        tipo = "Over 2.5"  # Pode variar se quiser testar outro
-        bilhete = gerar_bilhete(tipo)
+    jogos = buscar_jogos()
+    if not jogos:
+        bot.send_message(GRUPO_ID, "⚠️ Nenhum jogo disponível no momento.")
+        return
+    for tipo in TIPOS:
+        bilhete = montar_bilhete(jogos, tipo)
         if bilhete:
-            mensagem = f"🔥 Bilhete - {tipo}\n\n" + "\n".join(bilhete)
-            bot.send_message(GRUPO_ID, mensagem)
-            print("✅ Bilhete enviado")
-        else:
-            print("⚠️ Nenhum bilhete gerado")
-    except Exception as e:
-        print(f"❌ Erro ao enviar bilhete: {e}")
+            bot.send_message(GRUPO_ID, bilhete, parse_mode="Markdown")
+        time.sleep(1)
 
-# Loop de envio automático a cada 30 minutos
-def iniciar_envio_continuo():
-    print("🚀 Envio contínuo iniciado")
-    while True:
-        enviar_bilhetes()
-        time.sleep(1800)
+@app.route("/")
+def home():
+    return "Bot de Palpites ON"
 
-# Webhook do Telegram
-@app.route(f'/{BOT_TOKEN}', methods=["POST"])
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return '', 200
+    json_str = request.get_data().decode("UTF-8")
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
 
-@app.route('/')
-def index():
-    return 'Bot de Palpites funcionando!'
-
-# Iniciar Flask
-def iniciar_flask():
-    app.run(host="0.0.0.0", port=10000)
-
-# Início da aplicação
-if __name__ == "__main__":
-    webhook_url = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
+def iniciar_webhook():
+    url = os.getenv("RENDER_EXTERNAL_URL") or "https://bot-palpite-2.onrender.com"
     bot.remove_webhook()
-    bot.set_webhook(url=webhook_url)
+    time.sleep(1)
+    bot.set_webhook(url=f"{url}/{BOT_TOKEN}")
 
-    def iniciar_tudo():
-        enviar_bilhetes()  # ENVIO IMEDIATO
-        iniciar_envio_continuo()
+def loop_continuo():
+    while True:
+        try:
+            enviar_bilhetes()
+            time.sleep(1800)  # 30 minutos
+        except Exception as e:
+            print("Erro no loop:", e)
+            time.sleep(60)
 
-    Thread(target=iniciar_tudo).start()
-    iniciar_flask()
+if __name__ == "__main__":
+    from threading import Thread
+    Thread(target=loop_continuo).start()
+    iniciar_webhook()
+    app.run(host="0.0.0.0", port=10000)
