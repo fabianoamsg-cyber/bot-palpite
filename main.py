@@ -85,5 +85,8 @@ if __name__ == "__main__":
     webhook_url = os.getenv("RENDER_EXTERNAL_URL", "") + "/" + BOT_TOKEN
     bot.remove_webhook()
     bot.set_webhook(url=webhook_url)
+
+    enviar_bilhetes()  # <- ENVIO DE TESTE IMEDIATO
+
     Thread(target=iniciar_envio_continuo).start()
     iniciar_flask()
