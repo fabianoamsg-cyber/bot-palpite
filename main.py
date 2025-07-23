@@ -1,65 +1,37 @@
-import os
 import logging
-import aiohttp
+import asyncio
 from telegram import Bot
-from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
-import pytz
+import os
 
 TOKEN = os.getenv("BOT_TOKEN")
 CANAL_ID = os.getenv("GRUPO_ID")
-API_KEY = os.getenv("API_FOOTBALL_KEY")
 
-# Configure o fuso horário do Brasil
-fuso_brasilia = pytz.timezone("America/Sao_Paulo")
+TEXTOS = [
+    "🔥 PALPITE 1: Over 2.5 em Real Madrid x Barcelona\nProbabilidade: 78%",
+    "⚽ PALPITE 2: Ambas marcam em PSG x Milan\nProbabilidade: 82%",
+    "📈 PALPITE 3: Vitória do City contra o Arsenal\nProbabilidade: 71%",
+    "🎯 PALPITE 4: Over 1.5 em Flamengo x Palmeiras\nProbabilidade: 85%",
+    "💡 PALPITE 5: Empate entre Santos x Vasco\nProbabilidade: 65%"
+]
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+# Envia os palpites no canal
+async def enviar_palpites(context: ContextTypes.DEFAULT_TYPE):
+    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
+    mensagem = f"📊 BILHETE DE PALPITES - {agora}\n\n" + "\n\n".join(TEXTOS)
+    await context.bot.send_message(chat_id=CANAL_ID, text=mensagem)
 
-async def buscar_jogos():
-    url = "https://v3.football.api-sports.io/fixtures"
-    headers = {"x-apisports-key": API_KEY}
-    data = []
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params={"next": 10}) as resp:
-            result = await resp.json()
-            for jogo in result.get("response", []):
-                teams = jogo["teams"]
-                league = jogo["league"]
-                fixture = jogo["fixture"]
-
-                data_jogo = datetime.fromisoformat(fixture["date"].replace("Z", "+00:00")).astimezone(fuso_brasilia)
-                jogo_formatado = (
-                    f"🏆 {league['name']} ({league['country']})\n"
-                    f"📅 {data_jogo.strftime('%d/%m %H:%M')}\n"
-                    f"⚽ {teams['home']['name']} x {teams['away']['name']}"
-                )
-                data.append(jogo_formatado)
-    return data
-
-async def enviar_boletim(context: ContextTypes.DEFAULT_TYPE):
-    logging.info("Enviando boletim de jogos...")
-    jogos = await buscar_jogos()
-    if jogos:
-        texto = "🔥 *Boletim de Jogos do Dia*\n\n" + "\n\n".join(jogos)
-        await context.bot.send_message(chat_id=CANAL_ID, text=texto, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await context.bot.send_message(chat_id=CANAL_ID, text="Nenhum jogo encontrado.")
-
-async def start_bot():
+async def main():
+    logging.basicConfig(level=logging.INFO)
     application = ApplicationBuilder().token(TOKEN).build()
 
-    scheduler = AsyncIOScheduler(timezone=fuso_brasilia)
-    scheduler.add_job(enviar_boletim, "interval", hours=1, next_run_time=datetime.now(fuso_brasilia))
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(enviar_palpites, 'interval', minutes=30, args=[application])
     scheduler.start()
 
-    logging.info("Bot iniciado com Webhook no Render.")
     await application.run_polling()
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(start_bot())
+if __name__ == '__main__':
+    asyncio.run(main())
