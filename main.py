@@ -5,6 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import os
 
+# Carrega variáveis de ambiente
 TOKEN = os.getenv("BOT_TOKEN")
 GRUPO_ID = os.getenv("GRUPO_ID")
 
